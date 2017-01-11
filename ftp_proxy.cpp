@@ -30,13 +30,18 @@ int proxy_IP[4];
 int connect_FTP(int ser_port, int clifd);
 int proxy_func(int ser_port, int clifd, int rate);
 int create_server(int port);
-void rate_control();
 
-int max_sz = 2048;
 double rspeed = 0;
 int stop = 0;
 double limit = 30.0;
-double rate = 1;
+
+double uspeed = 0;
+int ustop = 0;
+double ulimit = 30.0;
+
+
+
+
 
 int main (int argc, char **argv) {
     int ctrlfd, connfd, port, rate = 0;
@@ -44,26 +49,21 @@ int main (int argc, char **argv) {
     socklen_t clilen;
     struct sockaddr_in cliaddr;
     if (argc < 3) {
-        printf("[v] Usage: ./executableFile <ProxyIP> <ProxyPort> \n");
+        printf("[v] Usage: ./executableFile <ProxyIP> <ProxyPort> <Drate> <Urate>\n");
         return -1;
     }
 
     sscanf(argv[1], " %d.%d.%d.%d", &proxy_IP[0], &proxy_IP[1], &proxy_IP[2], &proxy_IP[3]);
     port = atoi(argv[2]);
-    rate = 1;
     if( argc >= 4 ){
         limit = std::atoi(argv[3]);
-        printf("[v] Set rate as %f kbs\n",limit);
+        printf("[v] Set download rate as %f kbs\n",limit);
     }else limit = 1024*1000;
 
-    /*if( limit>=1024 )
-    {
-        printf("[!] Let limit as %f kbs\n", (85*limit+93440)/192);
-    }
-    else if( limit>= 512 )
-    {
-        printf("[!] Let limit as %f kbs\n", (55*limit+3840)/64);
-    }*/
+    if( argc >= 5 ){
+        ulimit = std::atoi(argv[4]);
+        printf("[v] Set upload rate as %f kbs\n",ulimit);
+    }else ulimit = 1024*1000;
 
     ctrlfd = create_server(port);
     clilen = sizeof(struct sockaddr_in);
@@ -129,7 +129,7 @@ int connect_FTP(int ser_port, int clifd) {
 }
 
 
-int speed_k;
+int speed_k,uspeed_k;
 const double eps=1e-1;
 int proxy_func(int ser_port, int clifd, int rate) {
     char buffer[MAXSIZE];
@@ -159,6 +159,7 @@ int proxy_func(int ser_port, int clifd, int rate) {
     FD_SET(clifd, &allset);
     FD_SET(serfd, &allset);
     speed_k=1;
+    uspeed_k=1;
     // selecting
     for (;;) {
         // reset select vars
@@ -171,6 +172,7 @@ int proxy_func(int ser_port, int clifd, int rate) {
             // check FTP client socket fd
             if (FD_ISSET(clifd, &rset)) {
                 memset(buffer, 0, MAXSIZE);
+                auto s = std::chrono::high_resolution_clock::now();
                 if ((byte_num = read(clifd, buffer, MAXSIZE)) <= 0) {
                     printf("[!] Client terminated the connection.\n");
                     break;
@@ -181,13 +183,37 @@ int proxy_func(int ser_port, int clifd, int rate) {
                     printf("[x] Write to server failed.\n");
                     break;
                 }
+                usleep(ustop);
+                auto e = std::chrono::high_resolution_clock::now();
+                std::chrono::nanoseconds ns = e-s;
+                double speed = (double)MAXSIZE/(ns.count())*(1E9/1024);
+                if( ulimit >= 1024 )
+                    speed = (85*speed+93440)/192;
+                else if(ulimit >= 768)
+                    speed = (201.5*speed+31488)/256;
+                else if(ulimit >= 512)
+                    speed = (112.2*speed+6553.6)/128;
+                else if(ulimit >= 256)
+                    speed = (125.05*speed+288)/128;
+                uspeed = (uspeed * 0.6 + speed * 0.4);
+                if(std::abs(uspeed-ulimit)>eps){
+                    if( uspeed > ulimit ){
+                        if(uspeed_k>0)++uspeed_k;
+                        else uspeed_k=1;
+                    }else if( uspeed < ulimit ){
+                        if(uspeed_k<0)--uspeed_k;
+                        else uspeed_k=-1;
+                    }
+                    ustop = std::max(0,ustop+100*uspeed_k);
+                }
+                //printf("[!] %3d bytes use %9lld ns, aka %5.4f kb/s %6d\n",byte_num,(long long)ns.count(),uspeed,ustop);
             }
 
             // check FTP server socket fd
             if (FD_ISSET(serfd, &rset)) {
                 memset(buffer, 0, MAXSIZE);
                 auto s = std::chrono::high_resolution_clock::now();
-                if ((byte_num = read(serfd, buffer, max_sz)) <= 0) {
+                if ((byte_num = read(serfd, buffer, MAXSIZE)) <= 0) {
                     printf("[!] Server terminated the connection.\n");
                     break;
                 }
@@ -222,19 +248,14 @@ int proxy_func(int ser_port, int clifd, int rate) {
                     }
                 }
 
-                const int buf_min = 256;
-                const int buf_max = MAXSIZE;
-
-
-                int sz = max_sz;
-                if (write(clifd, buffer, sz) < 0) {
+                if (write(clifd, buffer, MAXSIZE) < 0) {
                     printf("[x] Write to client failed.\n");
                     break;
                 }
                 usleep(stop);
                 auto e = std::chrono::high_resolution_clock::now();
                 std::chrono::nanoseconds ns = e-s;
-                double speed = (double)sz/(ns.count())*(1E9/1024);
+                double speed = (double)MAXSIZE/(ns.count())*(1E9/1024);
                 if( limit >= 1024 )
                     speed = (85*speed+93440)/192;
                 else if(limit >= 768)
@@ -285,11 +306,4 @@ int create_server(int port) {
 
     listen(listenfd, 3);
     return listenfd;
-}
-
-void rate_control() {
-    /**
-     * Implement your main logic of rate control here.
-     * Add return variable or parameters you need.
-     * **/
 }
