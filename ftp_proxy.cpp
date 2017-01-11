@@ -7,6 +7,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <cstdio>
+#include <cmath>
 #include <cstring>
 #include <cstdlib>
 #include <algorithm>
@@ -19,7 +20,7 @@
 #include <arpa/inet.h>
 
 
-#define MAXSIZE 256
+#define MAXSIZE 2048
 #define FTP_PORT 8740
 #define FTP_PASV_CODE 227
 #define FTP_ADDR "140.114.71.159"
@@ -35,6 +36,7 @@ int max_sz = 2048;
 double rspeed = 0;
 int stop = 0;
 double limit = 30.0;
+double rate = 1;
 
 int main (int argc, char **argv) {
     int ctrlfd, connfd, port, rate = 0;
@@ -48,10 +50,21 @@ int main (int argc, char **argv) {
 
     sscanf(argv[1], " %d.%d.%d.%d", &proxy_IP[0], &proxy_IP[1], &proxy_IP[2], &proxy_IP[3]);
     port = atoi(argv[2]);
+    rate = 1;
     if( argc >= 4 ){
         limit = std::atoi(argv[3]);
         printf("[v] Set rate as %f kbs\n",limit);
-    }else limit = INT_MAX;
+    }else limit = 1024*1000;
+
+    /*if( limit>=1024 )
+    {
+        printf("[!] Let limit as %f kbs\n", (85*limit+93440)/192);
+    }
+    else if( limit>= 512 )
+    {
+        printf("[!] Let limit as %f kbs\n", (55*limit+3840)/64);
+    }*/
+
     ctrlfd = create_server(port);
     clilen = sizeof(struct sockaddr_in);
     for (;;) {
@@ -116,7 +129,8 @@ int connect_FTP(int ser_port, int clifd) {
 }
 
 
-
+int speed_k;
+const double eps=1e-1;
 int proxy_func(int ser_port, int clifd, int rate) {
     char buffer[MAXSIZE];
     int serfd = -1, datafd = -1, connfd;
@@ -144,7 +158,7 @@ int proxy_func(int ser_port, int clifd, int rate) {
     FD_ZERO(&allset);
     FD_SET(clifd, &allset);
     FD_SET(serfd, &allset);
-
+    speed_k=1;
     // selecting
     for (;;) {
         // reset select vars
@@ -172,10 +186,12 @@ int proxy_func(int ser_port, int clifd, int rate) {
             // check FTP server socket fd
             if (FD_ISSET(serfd, &rset)) {
                 memset(buffer, 0, MAXSIZE);
-                if ((byte_num = read(serfd, buffer, MAXSIZE)) <= 0) {
+                auto s = std::chrono::high_resolution_clock::now();
+                if ((byte_num = read(serfd, buffer, max_sz)) <= 0) {
                     printf("[!] Server terminated the connection.\n");
                     break;
                 }
+                //auto re = std::chrono::high_resolution_clock::now();
                 if(ser_port == FTP_PORT)
                   buffer[byte_num] = '\0';
 
@@ -187,6 +203,7 @@ int proxy_func(int ser_port, int clifd, int rate) {
                     memset(buffer, 0, MAXSIZE);
                     sprintf(buffer, "%d Entering Passive Mode (%d,%d,%d,%d,%d,%d)\n", status, proxy_IP[0], proxy_IP[1], proxy_IP[2], proxy_IP[3], pasv[5], pasv[6]);
 
+                    speed_k=1;
                     if ((childpid = fork()) == 0) {
                         data_port = pasv[5] * 256 + pasv[6];
                         datafd = create_server(data_port);
@@ -205,25 +222,43 @@ int proxy_func(int ser_port, int clifd, int rate) {
                     }
                 }
 
-                
+                const int buf_min = 256;
+                const int buf_max = MAXSIZE;
 
-                for(int i=0;i<byte_num;i+=max_sz)
-                {
-                    int sz = std::min(max_sz,byte_num-i);
-                    auto s = std::chrono::high_resolution_clock::now();
-                    if (write(clifd, buffer+i, sz) < 0) {
-                        printf("[x] Write to client failed.\n");
-                        break;
-                    }
-                    usleep(stop);
-                    auto e = std::chrono::high_resolution_clock::now();
-                    std::chrono::nanoseconds ns = e-s;
-                    double speed = (double)sz/ns.count()*(1E9/1024);
-                    rspeed = rspeed * 0.6 + speed * 0.4;
-                    if     ( rspeed > limit )stop = stop+100;
-                    else if( rspeed < limit )stop = std::max(0,stop-100);
-                    printf("[!] %3d bytes use %9lld ns, aka %5.4f kb/s %6d\n",sz,(long long)ns.count(),rspeed,stop);
+
+                int sz = max_sz;
+                if (write(clifd, buffer, sz) < 0) {
+                    printf("[x] Write to client failed.\n");
+                    break;
                 }
+                usleep(stop);
+                auto e = std::chrono::high_resolution_clock::now();
+                std::chrono::nanoseconds ns = e-s;
+                double speed = (double)sz/(ns.count())*(1E9/1024);
+                if( limit >= 1024 )
+                    speed = (85*speed+93440)/192;
+                else if(limit >= 768)
+                    speed = (201.5*speed+31488)/256;
+                else if(limit >= 512)
+                    speed = (112.2*speed+6553.6)/128;
+                else if(limit >= 256)
+                    speed = (125.05*speed+288)/128;
+
+                rspeed = (rspeed * 0.6 + speed * 0.4);
+                
+                if(std::abs(rspeed-limit)>eps){
+                    if     ( rspeed > limit ){
+                        if(speed_k>0)++speed_k;
+                        else speed_k=1;
+                    }else if( rspeed < limit ){
+                        if(speed_k<0)--speed_k;
+                        else speed_k=-1;
+                    }
+                    stop = std::max(0,stop+100*speed_k);
+                }
+                //printf("[!] %3d bytes use %9lld ns, aka %5.4f kb/s %6d\n",sz,(long long)ns.count(),rspeed,stop);
+
+                //change max_sz
             }
         } else {
             printf("[x] Select() returns -1. ERROR!\n");
