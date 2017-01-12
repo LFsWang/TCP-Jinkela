@@ -173,7 +173,7 @@ int proxy_func(int ser_port, int clifd, int rate) {
                     break;
                 }
 
-
+                
                 if (write(serfd, buffer, byte_num) < 0) {
                     printf("[x] Write to server failed.\n");
                     break;
@@ -293,12 +293,18 @@ int create_server(int port) {
     servaddr.sin_family = AF_INET;
     servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
     servaddr.sin_port = htons(port);
+    int bsz = 128;
+    if(setsockopt(listenfd,SOL_SOCKET,SO_RCVBUF,&bsz,sizeof(bsz)) < 0)
+    {
+        perror("SO_RCVBUF failed. Error");
+        return -1;
+    }
     if (bind(listenfd, (struct sockaddr *)&servaddr , sizeof(servaddr)) < 0) {
         //print the error message
         perror("bind failed. Error");
         return -1;
     }
-
+    
     listen(listenfd, 3);
     return listenfd;
 }
