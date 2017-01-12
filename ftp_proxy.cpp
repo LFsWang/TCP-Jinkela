@@ -1,8 +1,3 @@
-/**
- * Simple FTP Proxy For 2015 Introduction to Computer Network.
- * Author: z58085111 @ HSNL
- * 2015/12
- * **/
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -186,7 +181,7 @@ int proxy_func(int ser_port, int clifd, int rate) {
                 usleep(ustop);
                 auto e = std::chrono::high_resolution_clock::now();
                 std::chrono::nanoseconds ns = e-s;
-                double speed = (double)MAXSIZE/(ns.count())*(1E9/1024);
+                double speed = (double)byte_num/(ns.count())*(1E9/1024);
                 if( ulimit >= 1024 )
                     speed = (85*speed+93440)/192;
                 else if(ulimit >= 768)
@@ -195,7 +190,7 @@ int proxy_func(int ser_port, int clifd, int rate) {
                     speed = (112.2*speed+6553.6)/128;
                 else if(ulimit >= 256)
                     speed = (125.05*speed+288)/128;
-                uspeed = (uspeed * 0.6 + speed * 0.4);
+                uspeed = uspeed==0 ? speed : (uspeed * 0.6 + speed * 0.4);
                 if(std::abs(uspeed-ulimit)>eps){
                     if( uspeed > ulimit ){
                         if(uspeed_k>0)++uspeed_k;
@@ -219,14 +214,14 @@ int proxy_func(int ser_port, int clifd, int rate) {
                 }
                 //auto re = std::chrono::high_resolution_clock::now();
                 if(ser_port == FTP_PORT)
-                  buffer[byte_num] = '\0';
+                    buffer[byte_num] = '\0';
 
                 status = atoi(buffer);
 
                 if (status == FTP_PASV_CODE && ser_port == FTP_PORT) {
 
                     sscanf(buffer, "%d Entering Passive Mode (%d,%d,%d,%d,%d,%d)",&pasv[0],&pasv[1],&pasv[2],&pasv[3],&pasv[4],&pasv[5],&pasv[6]);
-                    memset(buffer, 0, MAXSIZE);
+                    memset(buffer, 0, byte_num);
                     sprintf(buffer, "%d Entering Passive Mode (%d,%d,%d,%d,%d,%d)\n", status, proxy_IP[0], proxy_IP[1], proxy_IP[2], proxy_IP[3], pasv[5], pasv[6]);
 
                     speed_k=1;
@@ -248,14 +243,14 @@ int proxy_func(int ser_port, int clifd, int rate) {
                     }
                 }
 
-                if (write(clifd, buffer, MAXSIZE) < 0) {
+                if (write(clifd, buffer, byte_num) < 0) {
                     printf("[x] Write to client failed.\n");
                     break;
                 }
                 usleep(stop);
                 auto e = std::chrono::high_resolution_clock::now();
                 std::chrono::nanoseconds ns = e-s;
-                double speed = (double)MAXSIZE/(ns.count())*(1E9/1024);
+                double speed = (double)byte_num/(ns.count())*(1E9/1024);
                 if( limit >= 1024 )
                     speed = (85*speed+93440)/192;
                 else if(limit >= 768)
@@ -265,10 +260,10 @@ int proxy_func(int ser_port, int clifd, int rate) {
                 else if(limit >= 256)
                     speed = (125.05*speed+288)/128;
 
-                rspeed = (rspeed * 0.6 + speed * 0.4);
+                rspeed = rspeed==0 ? speed : (rspeed * 0.6 + speed * 0.4);
                 
                 if(std::abs(rspeed-limit)>eps){
-                    if     ( rspeed > limit ){
+                    if( rspeed > limit ){
                         if(speed_k>0)++speed_k;
                         else speed_k=1;
                     }else if( rspeed < limit ){
