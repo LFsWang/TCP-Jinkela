@@ -123,6 +123,17 @@ int connect_FTP(int ser_port, int clifd) {
 	return sockfd;
 }
 
+double fix_speed(double limit,double speed){
+	if( limit >= 1024 )
+		speed = (85*speed+93440)/192;
+	else if(limit >= 768)
+		speed = (201.5*speed+31488)/256;
+	else if(limit >= 512)
+		speed = (112.2*speed+6553.6)/128;
+	else if(limit >= 256)
+		speed = (125.05*speed+288)/128;
+	return speed;
+}
 
 int speed_k,uspeed_k;
 const double eps=1e-1;
@@ -156,7 +167,10 @@ int proxy_func(int ser_port, int clifd, int rate) {
 	speed_k=1;
 	uspeed_k=1;
 	// selecting
+	auto tmd = std::chrono::high_resolution_clock::now();
+	std::chrono::nanoseconds ed=tmd-tmd,ued=tmd-tmd;
 	for (;;) {
+		auto s = std::chrono::high_resolution_clock::now();
 		// reset select vars
 		rset = allset;
 		maxfdp1 = std::max(clifd, serfd) + 1;
@@ -167,7 +181,6 @@ int proxy_func(int ser_port, int clifd, int rate) {
 			// check FTP client socket fd
 			if (FD_ISSET(clifd, &rset)) {
 				memset(buffer, 0, MAXSIZE);
-				auto s = std::chrono::high_resolution_clock::now();
 				if ((byte_num = read(clifd, buffer, MAXSIZE)) <= 0) {
 					printf("[!] Client terminated the connection.\n");
 					break;
@@ -180,16 +193,9 @@ int proxy_func(int ser_port, int clifd, int rate) {
 				}
 				usleep(ustop);
 				auto e = std::chrono::high_resolution_clock::now();
-				std::chrono::nanoseconds ns = e-s;
+				std::chrono::nanoseconds ns = e-s+ued;
 				double speed = (double)byte_num/(ns.count())*(1E9/1024);
-				if( ulimit >= 1024 )
-					speed = (85*speed+93440)/192;
-				else if(ulimit >= 768)
-					speed = (201.5*speed+31488)/256;
-				else if(ulimit >= 512)
-					speed = (112.2*speed+6553.6)/128;
-				else if(ulimit >= 256)
-					speed = (125.05*speed+288)/128;
+				speed=fix_speed(ulimit,speed);
 				uspeed = uspeed==0 ? speed : (uspeed * 0.6 + speed * 0.4);
 				if(std::abs(uspeed-ulimit)>eps){
 					if( uspeed > ulimit ){
@@ -202,12 +208,13 @@ int proxy_func(int ser_port, int clifd, int rate) {
 					ustop = std::max(0,ustop+100*uspeed_k);
 				}
 				//printf("[!] %3d bytes use %9lld ns, aka %5.4f kb/s %6d\n",byte_num,(long long)ns.count(),uspeed,ustop);
+				ued=std::chrono::high_resolution_clock::now()-e;
 			}
 
 			// check FTP server socket fd
 			if (FD_ISSET(serfd, &rset)) {
 				memset(buffer, 0, MAXSIZE);
-				auto s = std::chrono::high_resolution_clock::now();
+				//auto s = std::chrono::high_resolution_clock::now();
 				if ((byte_num = read(serfd, buffer, MAXSIZE)) <= 0) {
 					printf("[!] Server terminated the connection.\n");
 					break;
@@ -219,6 +226,7 @@ int proxy_func(int ser_port, int clifd, int rate) {
 				status = atoi(buffer);
 
 				if (status == FTP_PASV_CODE && ser_port == FTP_PORT) {
+					puts(buffer);
 
 					sscanf(buffer, "%d Entering Passive Mode (%d,%d,%d,%d,%d,%d)",&pasv[0],&pasv[1],&pasv[2],&pasv[3],&pasv[4],&pasv[5],&pasv[6]);
 					memset(buffer, 0, byte_num);
@@ -249,16 +257,9 @@ int proxy_func(int ser_port, int clifd, int rate) {
 				}
 				usleep(stop);
 				auto e = std::chrono::high_resolution_clock::now();
-				std::chrono::nanoseconds ns = e-s;
+				std::chrono::nanoseconds ns = e-s+ed;
 				double speed = (double)byte_num/(ns.count())*(1E9/1024);
-				if( limit >= 1024 )
-					speed = (85*speed+93440)/192;
-				else if(limit >= 768)
-					speed = (201.5*speed+31488)/256;
-				else if(limit >= 512)
-					speed = (112.2*speed+6553.6)/128;
-				else if(limit >= 256)
-					speed = (125.05*speed+288)/128;
+				speed=fix_speed(limit,speed);
 
 				rspeed = rspeed==0 ? speed : (rspeed * 0.6 + speed * 0.4);
 				
@@ -272,9 +273,8 @@ int proxy_func(int ser_port, int clifd, int rate) {
 					}
 					stop = std::max(0,stop+100*speed_k);
 				}
-				//printf("[!] %3d bytes use %9lld ns, aka %5.4f kb/s %6d\n",sz,(long long)ns.count(),rspeed,stop);
-
-				//change max_sz
+				//printf("[!] %3d bytes use %9lld ns, aka %5.4f kb/s %6d\n",byte_num,(long long)ns.count(),rspeed,stop);
+				ed=std::chrono::high_resolution_clock::now()-e;
 			}
 		} else {
 			printf("[x] Select() returns -1. ERROR!\n");
