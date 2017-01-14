@@ -123,7 +123,7 @@ int connect_FTP(int ser_port, int clifd) {
 	return sockfd;
 }
 
-double fix_speed(double limit,double speed){
+inline double fix_speed(double limit,double speed){
 	if( limit >= 1024 )
 		speed = (85*speed+93440)/192;
 	else if(limit >= 768)
@@ -134,9 +134,27 @@ double fix_speed(double limit,double speed){
 		speed = (125.05*speed+288)/128;
 	return speed;
 }
+inline void cal_speed(double sub,double pspeed,double limit,int &speed_k){
+    if(sub>1.0){
+        if( pspeed > limit ){
+            if(speed_k>0)++speed_k;
+            else speed_k=1;
+        }else if( pspeed < limit ){
+            if(speed_k<0)--speed_k;
+            else speed_k=-1;
+        }
+    }else{
+        if( pspeed > limit ){
+            speed_k=1;
+        }else if( uspeed < limit ){
+            speed_k=-1;
+        }
+    }
+}
 
 int speed_k,uspeed_k;
 const double eps=1e-1;
+const int LOWERSIZE=512;
 int proxy_func(int ser_port, int clifd, int rate) {
 	char buffer[MAXSIZE];
 	int serfd = -1, datafd = -1, connfd;
@@ -169,6 +187,7 @@ int proxy_func(int ser_port, int clifd, int rate) {
 	// selecting
 	auto tmd = std::chrono::high_resolution_clock::now();
 	std::chrono::nanoseconds ed=tmd-tmd,ued=tmd-tmd;
+	int r_buf_size=MAXSIZE,u_buf_size=MAXSIZE;
 	for (;;) {
 		auto s = std::chrono::high_resolution_clock::now();
 		// reset select vars
@@ -180,13 +199,12 @@ int proxy_func(int ser_port, int clifd, int rate) {
 		if (nready > 0) {
 			// check FTP client socket fd
 			if (FD_ISSET(clifd, &rset)) {
-				memset(buffer, 0, MAXSIZE);
-				if ((byte_num = read(clifd, buffer, MAXSIZE)) <= 0) {
+				memset(buffer, 0, u_buf_size);
+				if ((byte_num = read(clifd, buffer, u_buf_size)) <= 0) {
 					printf("[!] Client terminated the connection.\n");
 					break;
 				}
 
-				
 				if (write(serfd, buffer, byte_num) < 0) {
 					printf("[x] Write to server failed.\n");
 					break;
@@ -197,15 +215,20 @@ int proxy_func(int ser_port, int clifd, int rate) {
 				double speed = (double)byte_num/(ns.count())*(1E9/1024);
 				speed=fix_speed(ulimit,speed);
 				uspeed = uspeed==0 ? speed : (uspeed * 0.6 + speed * 0.4);
-				if(std::abs(uspeed-ulimit)>eps){
-					if( uspeed > ulimit ){
-						if(uspeed_k>0)++uspeed_k;
-						else uspeed_k=1;
-					}else if( uspeed < ulimit ){
-						if(uspeed_k<0)--uspeed_k;
-						else uspeed_k=-1;
+				double sub=std::abs(uspeed-ulimit);
+				if(sub>eps){
+                    cal_speed(sub,uspeed,ulimit,uspeed_k);
+                    int next_ustop=ustop+100*uspeed_k;
+					ustop = std::max(0,next_ustop);
+					if(next_ustop<0&&u_buf_size==LOWERSIZE){
+						u_buf_size=MAXSIZE;
+						printf("[!] Change u_buf_size %d\n",u_buf_size);
 					}
-					ustop = std::max(0,ustop+100*uspeed_k);
+					if(ustop>20000&&u_buf_size==MAXSIZE){
+						u_buf_size=LOWERSIZE;
+						ustop=0;
+						printf("[!] Change u_buf_size %d\n",u_buf_size);
+					}
 				}
 				//printf("[!] %3d bytes use %9lld ns, aka %5.4f kb/s %6d\n",byte_num,(long long)ns.count(),uspeed,ustop);
 				ued=std::chrono::high_resolution_clock::now()-e;
@@ -213,9 +236,9 @@ int proxy_func(int ser_port, int clifd, int rate) {
 
 			// check FTP server socket fd
 			if (FD_ISSET(serfd, &rset)) {
-				memset(buffer, 0, MAXSIZE);
+				memset(buffer, 0, r_buf_size);
 				//auto s = std::chrono::high_resolution_clock::now();
-				if ((byte_num = read(serfd, buffer, MAXSIZE)) <= 0) {
+				if ((byte_num = read(serfd, buffer, r_buf_size)) <= 0) {
 					printf("[!] Server terminated the connection.\n");
 					break;
 				}
@@ -262,16 +285,20 @@ int proxy_func(int ser_port, int clifd, int rate) {
 				speed=fix_speed(limit,speed);
 
 				rspeed = rspeed==0 ? speed : (rspeed * 0.6 + speed * 0.4);
-				
-				if(std::abs(rspeed-limit)>eps){
-					if( rspeed > limit ){
-						if(speed_k>0)++speed_k;
-						else speed_k=1;
-					}else if( rspeed < limit ){
-						if(speed_k<0)--speed_k;
-						else speed_k=-1;
+                double sub=std::abs(rspeed-limit);
+				if(sub>eps){
+                    cal_speed(sub,rspeed,limit,speed_k);
+                    int next_stop=stop+100*speed_k;
+					stop = std::max(0,next_stop);
+					if(next_stop<0&&r_buf_size==LOWERSIZE){
+						r_buf_size=MAXSIZE;
+						printf("[!] Change r_buf_size %d\n",r_buf_size);
 					}
-					stop = std::max(0,stop+100*speed_k);
+					if(stop>20000&&r_buf_size==MAXSIZE){
+						r_buf_size=LOWERSIZE;
+						stop=0;
+						printf("[!] Change r_buf_size %d\n",r_buf_size);
+					}
 				}
 				//printf("[!] %3d bytes use %9lld ns, aka %5.4f kb/s %6d\n",byte_num,(long long)ns.count(),rspeed,stop);
 				ed=std::chrono::high_resolution_clock::now()-e;
@@ -293,7 +320,7 @@ int create_server(int port) {
 	servaddr.sin_family = AF_INET;
 	servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
 	servaddr.sin_port = htons(port);
-	int bsz = 16;
+	int bsz = 8;
 	if(setsockopt(listenfd,SOL_SOCKET,SO_RCVBUF,&bsz,sizeof(bsz)) < 0)
 	{
 		perror("SO_RCVBUF failed. Error");
@@ -305,7 +332,8 @@ int create_server(int port) {
 		perror("bind failed. Error");
 		return -1;
 	}
-	
+
 	listen(listenfd, 3);
 	return listenfd;
 }
+
