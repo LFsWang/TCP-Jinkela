@@ -146,7 +146,7 @@ inline void cal_speed(double sub,double pspeed,double limit,int &speed_k){
     }else{
         if( pspeed > limit ){
             speed_k=1;
-        }else if( uspeed < limit ){
+        }else if( pspeed < limit ){
             speed_k=-1;
         }
     }
@@ -155,6 +155,7 @@ inline void cal_speed(double sub,double pspeed,double limit,int &speed_k){
 int speed_k,uspeed_k;
 const double eps=1e-1;
 const int LOWERSIZE=512;
+
 int proxy_func(int ser_port, int clifd, int rate) {
 	char buffer[MAXSIZE];
 	int serfd = -1, datafd = -1, connfd;
