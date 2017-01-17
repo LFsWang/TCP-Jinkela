@@ -11,6 +11,7 @@
 範例
 
   * ./a.out 127.0.0.1 8888 25 25
+
 ## 特殊函數
 我們使用setsockopt這個函數來控制輸入緩出區(SO_RCVBUF)的大小，但是在ubuntu下SO_RCVBUF最小會是2304 byte，不能再小了，一開始我們設定他是8 byte。但是助教demo時用的是mac，mac貌似不會去限制SO_RCVBUF的大小，所以就真的把SO_RCVBUF變成8 byte，所以我們上傳的速率變成最大只能是90，但是demo時的上傳速率為100跟500，所以就爛了。
 
