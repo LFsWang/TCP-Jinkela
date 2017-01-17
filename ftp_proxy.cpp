@@ -34,10 +34,6 @@ double uspeed = 0;
 int ustop = 0;
 double ulimit = 30.0;
 
-
-
-
-
 int main (int argc, char **argv) {
 	int ctrlfd, connfd, port, rate = 0;
 	pid_t childpid;
@@ -321,13 +317,16 @@ int create_server(int port) {
 	servaddr.sin_family = AF_INET;
 	servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
 	servaddr.sin_port = htons(port);
-	int bsz = 8;
-	if(setsockopt(listenfd,SOL_SOCKET,SO_RCVBUF,&bsz,sizeof(bsz)) < 0)
-	{
+	int bsz,len=sizeof(bsz);
+	getsockopt(listenfd,SOL_SOCKET,SO_RCVBUF,&bsz,(socklen_t*)(&len));
+	printf("[!] original SO_RCVBUF = %d\n",bsz);
+	bsz=1024;
+	if(setsockopt(listenfd,SOL_SOCKET,SO_RCVBUF,&bsz,len) < 0){
 		perror("SO_RCVBUF failed. Error");
 		return -1;
 	}
-	printf("[!] SO_RCVBUF %d\n",bsz);
+	getsockopt(listenfd,SOL_SOCKET,SO_RCVBUF,&bsz,(socklen_t*)(&len));
+	printf("[!] set SO_RCVBUF = %d\n",bsz);
 	if (bind(listenfd, (struct sockaddr *)&servaddr , sizeof(servaddr)) < 0) {
 		//print the error message
 		perror("bind failed. Error");
