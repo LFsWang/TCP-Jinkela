@@ -131,21 +131,21 @@ inline double fix_speed(double limit,double speed){
 	return speed;
 }
 inline void cal_speed(double sub,double pspeed,double limit,int &speed_k){
-    if(sub>1.0){
-        if( pspeed > limit ){
-            if(speed_k>0)++speed_k;
-            else speed_k=1;
-        }else if( pspeed < limit ){
-            if(speed_k<0)--speed_k;
-            else speed_k=-1;
-        }
-    }else{
-        if( pspeed > limit ){
-            speed_k=1;
-        }else if( pspeed < limit ){
-            speed_k=-1;
-        }
-    }
+	if(sub>1.0){
+		if( pspeed > limit ){
+			if(speed_k>0)++speed_k;
+			else speed_k=1;
+		}else if( pspeed < limit ){
+			if(speed_k<0)--speed_k;
+			else speed_k=-1;
+		}
+	}else{
+		if( pspeed > limit ){
+			speed_k=1;
+		}else if( pspeed < limit ){
+			speed_k=-1;
+		}
+	}
 }
 
 int speed_k,uspeed_k;
@@ -214,8 +214,8 @@ int proxy_func(int ser_port, int clifd, int rate) {
 				uspeed = uspeed==0 ? speed : (uspeed * 0.6 + speed * 0.4);
 				double sub=std::abs(uspeed-ulimit);
 				if(sub>eps){
-                    cal_speed(sub,uspeed,ulimit,uspeed_k);
-                    int next_ustop=ustop+100*uspeed_k;
+					cal_speed(sub,uspeed,ulimit,uspeed_k);
+					int next_ustop=ustop+100*uspeed_k;
 					ustop = std::max(0,next_ustop);
 					if(next_ustop<0&&u_buf_size==LOWERSIZE){
 						u_buf_size=MAXSIZE;
@@ -282,10 +282,10 @@ int proxy_func(int ser_port, int clifd, int rate) {
 				speed=fix_speed(limit,speed);
 
 				rspeed = rspeed==0 ? speed : (rspeed * 0.6 + speed * 0.4);
-                double sub=std::abs(rspeed-limit);
+				double sub=std::abs(rspeed-limit);
 				if(sub>eps){
-                    cal_speed(sub,rspeed,limit,speed_k);
-                    int next_stop=stop+100*speed_k;
+					cal_speed(sub,rspeed,limit,speed_k);
+					int next_stop=stop+100*speed_k;
 					stop = std::max(0,next_stop);
 					if(next_stop<0&&r_buf_size==LOWERSIZE){
 						r_buf_size=MAXSIZE;
